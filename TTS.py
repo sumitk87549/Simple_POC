@@ -9,20 +9,10 @@ import torch
 import numpy as np
 from gtts import gTTS
 from pydub import AudioSegment
-# Using Python 3.13 compatible TTS libraries
-try:
-    from TTS.api import TTS
-    TTS_AVAILABLE = True
-except ImportError:
-    TTS_AVAILABLE = False
-    print("TTS library not available, using fallback engines")
-
-try:
-    import coqui
-    COQUI_AVAILABLE = True
-except ImportError:
-    COQUI_AVAILABLE = False
-
+from TTS.api import TTS
+from TTS.tts.configs.xtts_v2_config import XttsV2Config
+from TTS.tts.models.xtts_v2 import Xtts_v2
+import re
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -63,18 +53,23 @@ class EnhancedTTS:
         
         print(f"Enhanced TTS initialized: GPU={self.use_gpu}, Engine={self.engine_name}, Max Workers={self.max_workers}")
     
+    def _create_processed_folder(self, book_name):
+        """Create a processed folder with timestamp for the book"""
+        # Clean book name for filesystem
+        clean_book_name = re.sub(r'[^a-zA-Z0-9_-]', '_', book_name)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        folder_name = f"{clean_book_name}_{timestamp}"
+        processed_folder = os.path.join("./processed", folder_name)
+        os.makedirs(processed_folder, exist_ok=True)
+        return processed_folder
+    
     def _initialize_engine(self, preferred_engine):
         """Initialize the preferred TTS engine with fallback options"""
         if preferred_engine == "auto":
-            # Try engines in order of preference (Python 3.13 compatible)
-            engine_order = ['gtts']  # Start with gTTS as it's most compatible
-            if TTS_AVAILABLE:
-                engine_order.insert(0, 'coqui')
+            # Try engines in order of preference
+            engine_order = ['xtts', 'coqui', 'gtts']
         else:
-            engine_order = [preferred_engine]
-            # Add fallbacks
-            if preferred_engine != 'gtts':
-                engine_order.append('gtts')
+            engine_order = [preferred_engine] + [e for e in ['xtts', 'coqui', 'gtts'] if e != preferred_engine]
         
         for engine in engine_order:
             try:
@@ -95,12 +90,16 @@ class EnhancedTTS:
     def _init_coqui_tts(self):
         """Initialize Coqui TTS with GPU support"""
         try:
-            if not COQUI_AVAILABLE:
-                raise ImportError("Coqui TTS not available")
+            # Try to load a multilingual model
+            model_name = "tts_models/multilingual/multi-dataset/xtts_v2"
             
-            # For Python 3.13 compatibility, we'll use a simpler approach
-            # This is a placeholder - actual implementation would depend on available Coqui API
-            return {'type': 'coqui', 'model': 'placeholder'}
+            # Initialize TTS
+            tts = TTS(model_name)
+            
+            if self.use_gpu:
+                tts = tts.to("cuda")
+            
+            return {'type': 'coqui', 'model': tts}
         except Exception as e:
             print(f"Coqui TTS initialization failed: {e}")
             raise
@@ -108,12 +107,13 @@ class EnhancedTTS:
     def _init_xtts(self):
         """Initialize XTTS v2 for high-quality multilingual TTS"""
         try:
-            if not TTS_AVAILABLE:
-                raise ImportError("TTS library not available")
+            config = XttsV2Config()
+            model = Xtts_v2.init_from_config(config)
             
-            # Fallback to gTTS if XTTS is not available due to Python version
-            print("XTTS not available in Python 3.13, falling back to gTTS")
-            return self._init_gtts()
+            if self.use_gpu:
+                model = model.cuda()
+            
+            return {'type': 'xtts', 'model': model}
         except Exception as e:
             print(f"XTTS initialization failed: {e}")
             raise
@@ -137,14 +137,15 @@ class EnhancedTTS:
         else:
             return {}
     
-    def generate_tts(self, text, language, output_path, slow=False, voice_preset=None):
+    def generate_tts(self, text, language, output_path=None, book_name=None, slow=False, voice_preset=None):
         """
         Generate TTS audio with parallel processing and GPU acceleration
         
         Args:
             text (str): Text to convert to speech
             language (str): Target language
-            output_path (str): Output audio file path
+            output_path (str): Output audio file path (optional if book_name provided)
+            book_name (str): Book name for automatic folder creation (optional)
             slow (bool): Slow speech mode
             voice_preset (str): Voice preset for advanced engines
         """
@@ -152,6 +153,13 @@ class EnhancedTTS:
             return False
         
         try:
+            # Create output path if not provided but book_name is given
+            if output_path is None and book_name is not None:
+                output_folder = self._create_processed_folder(book_name)
+                output_path = os.path.join(output_folder, f"{book_name}_audio.mp3")
+            elif output_path is None:
+                raise ValueError("Either output_path or book_name must be provided")
+            
             # Split text into chunks for parallel processing
             chunks = self._split_text_for_tts(text)
             
@@ -196,27 +204,36 @@ class EnhancedTTS:
             return False
     
     def _generate_advanced_tts(self, text, language, output_path, voice_preset):
-        """Generate TTS using advanced engines (Coqui/XTTS) with fallbacks"""
+        """Generate TTS using advanced engines (Coqui/XTTS)"""
         try:
-            if self.engine_name == 'coqui' and COQUI_AVAILABLE:
-                # Placeholder for Coqui TTS implementation
-                # For now, fall back to gTTS
-                print("Coqui TTS not fully implemented, falling back to gTTS")
-                return self._generate_gtts(text, language, output_path, False)
+            with self.tts_lock:
+                if self.engine_name == 'coqui':
+                    model = self.current_engine['model']
+                    lang_code = self._get_language_code(language)
+                    
+                    # Generate speech
+                    wav = model.tts(text, speaker=voice_preset, language=lang_code)
+                    
+                    # Save to file
+                    model.save_wav(wav, output_path)
+                    
+                elif self.engine_name == 'xtts':
+                    model = self.current_engine['model']
+                    lang_code = self._get_language_code(language)
+                    
+                    # Generate speech with XTTS
+                    wav = model.synthesize(text, speaker=voice_preset, language=lang_code)
+                    
+                    # Save to file
+                    import soundfile as sf
+                    sf.write(output_path, wav, 22050)
             
-            elif self.engine_name == 'xtts' and TTS_AVAILABLE:
-                # Placeholder for XTTS implementation
-                # For now, fall back to gTTS
-                print("XTTS not fully implemented for Python 3.13, falling back to gTTS")
-                return self._generate_gtts(text, language, output_path, False)
+            print(f"{self.engine_name} audio saved to: {output_path}")
+            return True
             
-            else:
-                # Fallback to gTTS
-                return self._generate_gtts(text, language, output_path, False)
-                
         except Exception as e:
-            print(f"Advanced TTS generation error: {e}, falling back to gTTS")
-            return self._generate_gtts(text, language, output_path, False)
+            print(f"{self.engine_name} generation error: {e}")
+            return False
     
     def _generate_tts_chunk_worker(self, args):
         """Worker function for parallel TTS generation"""
@@ -345,7 +362,7 @@ class EnhancedTTS:
         }
         return language_map.get(language, 'en')
     
-    async def generate_tts_async(self, text, language, output_path, slow=False, voice_preset=None):
+    async def generate_tts_async(self, text, language, output_path=None, book_name=None, slow=False, voice_preset=None):
         """Async version of TTS generation"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
@@ -354,6 +371,7 @@ class EnhancedTTS:
             text,
             language,
             output_path,
+            book_name,
             slow,
             voice_preset
         )
@@ -386,7 +404,7 @@ if __name__ == "__main__":
     success = tts.generate_tts(
         text=test_text,
         language="English",
-        output_path="test_enhanced_tts.mp3",
+        book_name="test_enhanced_tts",
         slow=False
     )
     

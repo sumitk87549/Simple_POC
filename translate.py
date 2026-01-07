@@ -14,6 +14,7 @@ from pydub.silence import split_on_silence
 import tempfile
 import torch
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+import re
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -73,6 +74,16 @@ class TextTranslatorAndTTS:
                 self.use_gpu = False
         
         print(f"Translation initialized: GPU={self.use_gpu}, Max Workers={self.max_workers}")
+    
+    def _create_processed_folder(self, book_name):
+        """Create a processed folder with timestamp for the book"""
+        # Clean book name for filesystem
+        clean_book_name = re.sub(r'[^a-zA-Z0-9_-]', '_', book_name)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        folder_name = f"{clean_book_name}_{timestamp}"
+        processed_folder = os.path.join("./processed", folder_name)
+        os.makedirs(processed_folder, exist_ok=True)
+        return processed_folder
     
     def get_language_code(self, language_name):
         """Get language code from language name"""
@@ -303,11 +314,14 @@ class TextTranslatorAndTTS:
         
         return chunks
     
-    async def process_book_translation_async(self, original_text, target_language, book_name, output_folder):
+    async def process_book_translation_async(self, original_text, target_language, book_name, output_folder=None):
         """Async version of complete book translation and TTS"""
         try:
-            # Create output folder if it doesn't exist
-            os.makedirs(output_folder, exist_ok=True)
+            # Create processed folder if output_folder not specified
+            if output_folder is None:
+                output_folder = self._create_processed_folder(book_name)
+            else:
+                os.makedirs(output_folder, exist_ok=True)
             
             # Translate text asynchronously
             print(f"Translating to {target_language}...")
@@ -377,9 +391,13 @@ class TextTranslatorAndTTS:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(text)
     
-    def process_book_translation(self, original_text, target_language, book_name, output_folder):
+    def process_book_translation(self, original_text, target_language, book_name, output_folder=None):
         """Process complete book translation and TTS (sync wrapper)"""
         try:
+            # Create processed folder if output_folder not specified
+            if output_folder is None:
+                output_folder = self._create_processed_folder(book_name)
+            
             # Try to run async version if available
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -402,8 +420,11 @@ class TextTranslatorAndTTS:
     def _process_book_translation_sync(self, original_text, target_language, book_name, output_folder):
         """Synchronous fallback for book processing"""
         try:
-            # Create output folder if it doesn't exist
-            os.makedirs(output_folder, exist_ok=True)
+            # Create processed folder if output_folder not specified
+            if output_folder is None:
+                output_folder = self._create_processed_folder(book_name)
+            else:
+                os.makedirs(output_folder, exist_ok=True)
             
             # Translate text
             print(f"Translating to {target_language}...")
