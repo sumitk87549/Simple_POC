@@ -17,21 +17,11 @@ transformers>=4.30.0
 accelerate>=0.20.0
 datasets>=2.12.0
 
-# Enhanced TTS dependencies - Python 3.13 compatible alternatives
-# TTS library has compatibility issues with Python 3.13, using alternatives
-coqui-tts>=0.15.0
-soundfile>=0.12.0
-librosa>=0.10.0
-
 # Async and parallel processing
 aiohttp>=3.8.0
 numpy>=1.24.0
 scipy>=1.10.0
 pillow>=10.0.0
-
-# Additional TTS alternatives for Python 3.13 compatibility
-piper-tts>=1.2.0
-speechbrain>=0.5.0
 
 # Optional: For GPU support, install CUDA version separately:
 # For CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118

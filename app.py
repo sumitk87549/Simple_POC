@@ -6,7 +6,7 @@ import torch
 from extract import EbookExtractor
 from cleaning import TextCleaner
 from translate import TextTranslatorAndTTS
-from TTS import EnhancedTTS
+from enhanced_tts import EnhancedTTS
 
 # Configure Streamlit page
 st.set_page_config(
@@ -89,7 +89,7 @@ def main():
     extractor = EbookExtractor()
     cleaner = TextCleaner()
     translator = TextTranslatorAndTTS(use_gpu=use_gpu, max_workers=None if use_parallel else 1)
-    enhanced_tts = EnhancedTTS(use_gpu=use_gpu, preferred_engine="auto")
+    enhanced_tts = EnhancedTTS(use_gpu=use_gpu)
     
     # Get supported languages
     supported_languages = translator.get_supported_languages()
