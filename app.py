@@ -82,6 +82,11 @@ def main():
     # AI Translation settings
     st.sidebar.subheader("🤖 AI Translation Settings")
     use_ai_translation = st.sidebar.checkbox("🎯 Use AI Translation", value=False)
+    
+    # Processing options
+    st.sidebar.subheader("⚙️ Processing Options")
+    enable_translation = st.sidebar.checkbox("🌍 Enable Translation", value=True)
+    enable_audio = st.sidebar.checkbox("🔊 Enable Audio Generation", value=True)
 
     if use_ai_translation:
         # Get available AI models
@@ -158,7 +163,7 @@ def main():
     enhanced_tts = EnhancedTTS(use_gpu=use_gpu)
     
     # Get supported languages
-    supported_languages = translator.get_supported_languages()
+    supported_languages = translator.get_supported_languages() # Check if the langugaes shown are supported or according to model/code can do it or appearing generally (various laguages, weather model/code can translate or not)
     
     # Language selection dropdown
     target_language = st.sidebar.selectbox(
@@ -194,7 +199,7 @@ def main():
             
             # Process button
             if st.button("🚀 Process Ebook", type="primary"):
-                process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel, ai_translator)
+                process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel, ai_translator, enable_translation, enable_audio)
         else:
             st.error("❌ Unsupported file format. Please upload a PDF or EPUB file.")
     
@@ -245,7 +250,7 @@ def main():
         - CPU-only mode available but slower
         """)
 
-def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel, ai_translator=None):
+def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel, ai_translator=None, enable_translation=True, enable_audio=True):
     """Process the uploaded ebook file"""
     
     # Create progress bar
@@ -287,159 +292,132 @@ def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, t
         
         progress_bar.progress(60)
         
-        # Step 5: Translate and generate TTS
-        status_text.text(f"🌍 Translating to {target_language}...")
-
-        if ai_translator and ai_translator.validate_model():
-            # Use AI translation
-            status_text.text("🤖 Using AI Translation...")
-            print(f"Using AI translation with model: {ai_translator.model_name}")
-
-            # Create output folder
-            os.makedirs(output_folder, exist_ok=True)
-
-            # Perform AI translation
-            translated_text = ai_translator.translate_text(cleaned_text, target_language)
-
-            # Save translated text
-            translated_file_path = os.path.join(output_folder, f"{book_name}_translated.txt")
-            with open(translated_file_path, 'w', encoding='utf-8') as f:
-                f.write(translated_text)
-
-            # Generate standard TTS audio
-            audio_file_path = os.path.join(output_folder, f"{book_name}_audio.mp3")
-            tts_success = translator.generate_tts(translated_text, target_language, audio_file_path)
-
-            # Prepare result
-            result = {
-                'success': tts_success,
-                'translated_file': translated_file_path,
-                'audio_file': audio_file_path if tts_success else None,
-                'translated_text': translated_text,
-                'translation_method': 'ai'
-            }
-
-            if tts_success:
-                print(f"AI Translation and TTS completed successfully")
-            else:
-                print(f"AI Translation completed, but TTS generation failed")
-        else:
-            # Use regular translation
-            result = translator.process_book_translation(
-                cleaned_text,
-                target_language,
-                book_name,
-                output_folder
-            )
-            result['translation_method'] = 'google'
-
-        progress_bar.progress(90)
+        # Step 5: Handle processing based on checkbox selections
+        result = {'success': False, 'processed_files': []}
         
-        # Step 6: Generate enhanced TTS if translation succeeded
-        if result['success'] and 'translated_text' in result:
-            status_text.text("🔊 Generating enhanced audio...")
-            audio_file_path = os.path.join(output_folder, f"{book_name}_enhanced_audio.mp3")
+        # Always save cleaned text to processed folder
+        cleaned_file_path = os.path.join("./processed", f"{book_name}_{timestamp}_cleaned.txt")
+        os.makedirs(os.path.dirname(cleaned_file_path), exist_ok=True)
+        with open(cleaned_file_path, 'w', encoding='utf-8') as f:
+            f.write(cleaned_text)
+        result['processed_files'].append(cleaned_file_path)
+        
+        # Check if translation is enabled
+        if enable_translation:
+            status_text.text(f"🌍 Translating to {target_language}...")
             
-            # Use enhanced TTS for better quality
-            tts_success = enhanced_tts.generate_tts(
-                result['translated_text'],
-                target_language,
-                audio_file_path
-            )
-            
-            if tts_success:
-                result['enhanced_audio_file'] = audio_file_path
-                print(f"Enhanced audio saved to: {audio_file_path}")
+            if ai_translator and ai_translator.validate_model():
+                # Use AI translation
+                status_text.text("🤖 Using AI Translation...")
+                print(f"Using AI translation with model: {ai_translator.model_name}")
+
+                # Create output folder
+                os.makedirs(output_folder, exist_ok=True)
+
+                # Perform AI translation
+                translated_text = ai_translator.translate_text(cleaned_text, target_language)
+
+                # Save translated text
+                translated_file_path = os.path.join(output_folder, f"{book_name}_translated.txt")
+                with open(translated_file_path, 'w', encoding='utf-8') as f:
+                    f.write(translated_text)
+                result['processed_files'].append(translated_file_path)
+
+                # Generate standard TTS audio if audio is enabled
+                if enable_audio:
+                    audio_file_path = os.path.join(output_folder, f"{book_name}_audio.mp3")
+                    tts_success = translator.generate_tts(translated_text, target_language, audio_file_path)
+                    if tts_success:
+                        result['processed_files'].append(audio_file_path)
+                        result['success'] = True
+                    else:
+                        print(f"AI Translation completed, but TTS generation failed")
+                else:
+                    result['success'] = True  # Translation succeeded even without audio
+            else:
+                # Use regular translation
+                translation_result = translator.process_book_translation(
+                    cleaned_text,
+                    target_language,
+                    book_name,
+                    output_folder
+                )
+                
+                if translation_result['success']:
+                    result['success'] = True
+                    if 'translated_file' in translation_result:
+                        result['processed_files'].append(translation_result['translated_file'])
+                    
+                    # Generate enhanced TTS if audio is enabled and translation succeeded
+                    if enable_audio and 'translated_text' in translation_result:
+                        status_text.text("🔊 Generating enhanced audio...")
+                        audio_file_path = os.path.join(output_folder, f"{book_name}_enhanced_audio.mp3")
+                        
+                        # Use enhanced TTS for better quality
+                        tts_success = enhanced_tts.generate_tts(
+                            translation_result['translated_text'],
+                            target_language,
+                            audio_file_path
+                        )
+                        
+                        if tts_success:
+                            result['processed_files'].append(audio_file_path)
+                            print(f"Enhanced audio saved to: {audio_file_path}")
+        
+        # If translation is disabled but audio is enabled, show warning
+        elif enable_audio:
+            st.warning("⚠️ Audio generation requires translation to be enabled.")
         
         # Step 6: Display results
-        if result['success']:
-            progress_bar.progress(100)
-            status_text.text("✅ Processing completed successfully!")
-            
-            # Success message
-            translation_method = "AI Translation 🤖" if result.get('translation_method') == 'ai' else "Google Translation 🌍"
-            st.markdown(f"""
-            <div class="success-message">
-                <h3>🎉 Processing Completed Successfully!</h3>
-                <p>Your ebook has been processed using {translation_method} and files are saved in: <strong>{output_folder}/</strong></p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Display file information
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("📄 Translated Text")
-                st.info(f"File: {result['translated_file']}")
+        progress_bar.progress(100)
+        status_text.text("✅ Processing completed successfully!")
+        
+        # Success message
+        st.markdown(f"""
+        <div class="success-message">
+            <h3>🎉 Processing Completed Successfully!</h3>
+            <p>Your ebook has been processed and files are saved in the appropriate folders.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Display file information
+        st.subheader("📁 Processed Files")
+        
+        for file_path in result['processed_files']:
+            if os.path.exists(file_path):
+                file_name = os.path.basename(file_path)
+                file_size = os.path.getsize(file_path)
+                st.info(f"📄 **{file_name}** ({file_size:,} bytes)")
                 
-                # Show preview of translated text
-                if result['translated_text']:
-                    with st.expander("Preview Translated Text"):
-                        st.text_area("Translated Content:", result['translated_text'][:1000] + "..." if len(result['translated_text']) > 1000 else result['translated_text'], height=200)
-            
-            with col2:
-                st.subheader("🔊 Audio Files")
+                # Show preview for text files
+                if file_path.endswith('.txt'):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        with st.expander(f"Preview {file_name}"):
+                            st.text_area(f"Content:", content[:1000] + "..." if len(content) > 1000 else content, height=200)
                 
-                # Standard audio
-                if 'audio_file' in result:
-                    st.info(f"Standard Audio: {result['audio_file']}")
+                # Provide audio player for audio files
+                elif file_path.endswith(('.mp3', '.wav')):
+                    st.audio(file_path, format='audio/mp3')
+        
+        # Download buttons
+        st.subheader("💾 Download Files")
+        
+        cols = st.columns(len(result['processed_files']))
+        for i, file_path in enumerate(result['processed_files']):
+            if os.path.exists(file_path):
+                with open(file_path, 'rb' if file_path.endswith(('.mp3', '.wav')) else 'r', encoding='utf-8') as f:
+                    data = f.read()
+                    mime_type = 'audio/mpeg' if file_path.endswith(('.mp3', '.wav')) else 'text/plain'
+                    file_name = os.path.basename(file_path)
                     
-                    # Provide audio player if file exists
-                    if os.path.exists(result['audio_file']):
-                        st.audio(result['audio_file'], format='audio/mp3')
-                
-                # Enhanced audio
-                if 'enhanced_audio_file' in result:
-                    st.success(f"Enhanced Audio: {result['enhanced_audio_file']}")
-                    
-                    # Provide audio player if file exists
-                    if os.path.exists(result['enhanced_audio_file']):
-                        st.audio(result['enhanced_audio_file'], format='audio/mp3')
-                elif 'audio_file' not in result:
-                    st.warning("No audio files were generated")
-            
-            # Download buttons
-            st.subheader("💾 Download Files")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if os.path.exists(result['translated_file']):
-                    with open(result['translated_file'], 'r', encoding='utf-8') as f:
+                    with cols[i % len(cols)]:
                         st.download_button(
-                            label="📄 Download Translated Text",
-                            data=f.read(),
-                            file_name=os.path.basename(result['translated_file']),
-                            mime="text/plain"
+                            label=f"📥 Download {file_name}",
+                            data=data,
+                            file_name=file_name,
+                            mime=mime_type
                         )
-            
-            with col2:
-                if 'audio_file' in result and os.path.exists(result['audio_file']):
-                    with open(result['audio_file'], 'rb') as f:
-                        st.download_button(
-                            label="🔊 Download Standard Audio",
-                            data=f.read(),
-                            file_name=os.path.basename(result['audio_file']),
-                            mime="audio/mpeg"
-                        )
-            
-            with col3:
-                if 'enhanced_audio_file' in result and os.path.exists(result['enhanced_audio_file']):
-                    with open(result['enhanced_audio_file'], 'rb') as f:
-                        st.download_button(
-                            label="🚀 Download Enhanced Audio",
-                            data=f.read(),
-                            file_name=os.path.basename(result['enhanced_audio_file']),
-                            mime="audio/mpeg"
-                        )
-            
-        else:
-            st.error(f"❌ Processing failed: {result.get('error', 'Unknown error')}")
-            
-            # Show partial results if available
-            if 'translated_file' in result and os.path.exists(result['translated_file']):
-                st.warning("⚠️ Translation was completed but audio generation failed.")
-                st.info(f"Translated text is available at: {result['translated_file']}")
         
         # Clean up temporary file
         if os.path.exists(temp_file_path):
