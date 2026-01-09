@@ -11,7 +11,7 @@ nltk==3.9.1
 pygame>=2.5.0
 
 # Performance and GPU dependencies
-torch>=2.0.0
+torch>=2.2.0
 torchvision>=0.15.0
 transformers>=4.30.0
 accelerate>=0.20.0
@@ -22,6 +22,9 @@ aiohttp>=3.8.0
 numpy>=1.24.0
 scipy>=1.10.0
 pillow>=10.0.0
+
+# Fix for pkg_resources deprecation warning
+setuptools<81.0.0
 
 # Optional: For GPU support, install CUDA version separately:
 # For CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118

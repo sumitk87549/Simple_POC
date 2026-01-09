@@ -1,5 +1,16 @@
-import streamlit as st
+# Suppress warnings before any imports
+import warnings
 import os
+warnings.filterwarnings('ignore', category=UserWarning, module='pygame')
+warnings.filterwarnings('ignore', message='.*torch.classes.*')
+warnings.filterwarnings('ignore', message='.*pkg_resources.*')
+warnings.filterwarnings('ignore', message='.*meta tensor.*')
+warnings.filterwarnings('ignore', message='.*Cannot copy out of meta tensor.*')
+
+# Set environment variable to prevent tokenizer parallelism issues
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+import streamlit as st
 import time
 from datetime import datetime
 import torch
@@ -7,6 +18,7 @@ from extract import EbookExtractor
 from cleaning import TextCleaner
 from translate import TextTranslatorAndTTS
 from enhanced_tts import EnhancedTTS
+from deepTranslate import DeepTranslator
 
 # Configure Streamlit page
 st.set_page_config(
@@ -60,12 +72,55 @@ def main():
     st.sidebar.title("⚙️ Configuration")
     
     # Language selection
-    st.sidebar.subheader("🌍 Translation Settings")
+    st.sidebar.subheader("🌍 Translation Setting s")
     
     # Performance settings
     st.sidebar.subheader("⚡ Performance Settings")
     use_gpu = st.sidebar.checkbox("🚀 Use GPU Acceleration", value=True)
     use_parallel = st.sidebar.checkbox("🔄 Use Parallel Processing", value=True)
+
+    # AI Translation settings
+    st.sidebar.subheader("🤖 AI Translation Settings")
+    use_ai_translation = st.sidebar.checkbox("🎯 Use AI Translation", value=False)
+
+    if use_ai_translation:
+        # Get available AI models
+        ai_translator = DeepTranslator(use_gpu=use_gpu)
+        available_models = ai_translator.get_available_models()
+
+        ai_model = st.sidebar.selectbox(
+            "AI Model:",
+            options=available_models,
+            index=0
+        )
+
+        chunk_size = st.sidebar.slider(
+            "Chunk Size:",
+            min_value=1000,
+            max_value=8000,
+            value=4000,
+            step=500,
+            help="Characters per translation chunk"
+        )
+
+        num_threads = st.sidebar.slider(
+            "Threads:",
+            min_value=1,
+            max_value=8,
+            value=6,
+            help="Number of parallel translation threads"
+        )
+
+        # Update AI translator with selected parameters
+        selected_model_name = ai_translator.supported_models.get(ai_model, available_models[0])
+        ai_translator = DeepTranslator(
+            model_name=selected_model_name,
+            chunk_size=chunk_size,
+            max_threads=num_threads,
+            use_gpu=use_gpu
+        )
+    else:
+        ai_translator = None
     
     # Display performance info
     if st.sidebar.button("📊 Show Performance Info"):
@@ -74,13 +129,24 @@ def main():
             'CPU Cores': os.cpu_count(),
             'Max Workers': min(32, (os.cpu_count() or 1) + 4)
         }
-        
+
         tts_info = enhanced_tts.get_performance_info()
-        
+
         st.sidebar.markdown("**Translation Performance:**")
         for key, value in trans_info.items():
             st.sidebar.write(f"- {key}: {value}")
-        
+
+        # Show AI translator info if enabled
+        if use_ai_translation and ai_translator:
+            ai_info = ai_translator.get_performance_info()
+            st.sidebar.markdown("**AI Translation Performance:**")
+            for key, value in ai_info.items():
+                st.sidebar.write(f"- {key}: {value}")
+        elif use_ai_translation:
+            st.sidebar.write("- AI Translator: ❌ Failed to load")
+        else:
+            st.sidebar.write("- AI Translator: ❌ Failed to load\n use_ai_translation --->>>\n", use_ai_translation, "\n ai_translator --->>>\n", ai_translator)
+
         st.sidebar.markdown("**TTS Performance:**")
         for key, value in tts_info.items():
             st.sidebar.write(f"- {key}: {value}")
@@ -128,7 +194,7 @@ def main():
             
             # Process button
             if st.button("🚀 Process Ebook", type="primary"):
-                process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel)
+                process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel, ai_translator)
         else:
             st.error("❌ Unsupported file format. Please upload a PDF or EPUB file.")
     
@@ -136,19 +202,23 @@ def main():
     with st.expander("📖 How to Use"):
         st.markdown("""
         ### Steps to use this app:
-        
+
         1. **Upload an Ebook**: Click "Browse files" and select a PDF or EPUB file
-        2. **Select Language**: Choose your target language from the sidebar
+        2. **Configure Settings**: Choose translation method (Google or AI), language, and performance options
         3. **Process**: Click "Process Ebook" to start the translation
         4. **Wait**: The app will extract text, clean it, translate it, and generate audio
         5. **Download**: Download the translated text and audio files
-        
+
         ### What happens during processing:
         - 📄 **Text Extraction**: Text is extracted from your ebook
         - 🧹 **Text Cleaning**: The text is cleaned and formatted
-        - 🌍 **Translation**: Text is translated to your selected language
+        - 🌍 **Translation**: Text is translated using either Google Translate or AI models (mBART-50, M2M100, etc.)
         - 🔊 **Audio Generation**: Audio is created from the translated text
         - 💾 **File Saving**: Files are saved in a timestamped folder
+
+        ### Translation Options:
+        - **Google Translate**: Fast, internet-based translation (default)
+        - **AI Translation**: Advanced neural models for higher quality (requires more resources)
         """)
     
     # System requirements section
@@ -156,20 +226,26 @@ def main():
         st.markdown("""
         ### Required Dependencies:
         - Python 3.7+
-        - Internet connection for translation and TTS
-        
-        ### No API Keys Required!
-        This app uses free services:
-        - **Google Translate** (via googletrans library)
-        - **Google Text-to-Speech** (via gTTS library)
-        
-        ### Note:
+        - Internet connection for Google translation and TTS
+        - Hugging Face Transformers for AI translation
+
+        ### Translation Options:
+        - **Google Translate**: Free, internet-based (no additional requirements)
+        - **AI Translation**: Requires Hugging Face models (mBART-50, M2M100, etc.)
+
+        ### Performance Notes:
+        - **Google Translate**: Fast but limited by API rate limits
+        - **AI Translation**: Higher quality but requires more GPU memory and processing time
         - Large files may take several minutes to process
-        - Translation quality depends on Google Translate
         - Audio generation may be slow for long texts
+
+        ### GPU Recommendations:
+        - For AI translation, CUDA-enabled GPU recommended
+        - Minimum 8GB VRAM for larger models
+        - CPU-only mode available but slower
         """)
 
-def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel):
+def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, target_language, use_gpu, use_parallel, ai_translator=None):
     """Process the uploaded ebook file"""
     
     # Create progress bar
@@ -213,14 +289,50 @@ def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, t
         
         # Step 5: Translate and generate TTS
         status_text.text(f"🌍 Translating to {target_language}...")
-        
-        result = translator.process_book_translation(
-            cleaned_text, 
-            target_language, 
-            book_name, 
-            output_folder
-        )
-        
+
+        if ai_translator and ai_translator.validate_model():
+            # Use AI translation
+            status_text.text("🤖 Using AI Translation...")
+            print(f"Using AI translation with model: {ai_translator.model_name}")
+
+            # Create output folder
+            os.makedirs(output_folder, exist_ok=True)
+
+            # Perform AI translation
+            translated_text = ai_translator.translate_text(cleaned_text, target_language)
+
+            # Save translated text
+            translated_file_path = os.path.join(output_folder, f"{book_name}_translated.txt")
+            with open(translated_file_path, 'w', encoding='utf-8') as f:
+                f.write(translated_text)
+
+            # Generate standard TTS audio
+            audio_file_path = os.path.join(output_folder, f"{book_name}_audio.mp3")
+            tts_success = translator.generate_tts(translated_text, target_language, audio_file_path)
+
+            # Prepare result
+            result = {
+                'success': tts_success,
+                'translated_file': translated_file_path,
+                'audio_file': audio_file_path if tts_success else None,
+                'translated_text': translated_text,
+                'translation_method': 'ai'
+            }
+
+            if tts_success:
+                print(f"AI Translation and TTS completed successfully")
+            else:
+                print(f"AI Translation completed, but TTS generation failed")
+        else:
+            # Use regular translation
+            result = translator.process_book_translation(
+                cleaned_text,
+                target_language,
+                book_name,
+                output_folder
+            )
+            result['translation_method'] = 'google'
+
         progress_bar.progress(90)
         
         # Step 6: Generate enhanced TTS if translation succeeded
@@ -245,10 +357,11 @@ def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, t
             status_text.text("✅ Processing completed successfully!")
             
             # Success message
+            translation_method = "AI Translation 🤖" if result.get('translation_method') == 'ai' else "Google Translation 🌍"
             st.markdown(f"""
             <div class="success-message">
                 <h3>🎉 Processing Completed Successfully!</h3>
-                <p>Your ebook has been processed and files are saved in: <strong>{output_folder}/</strong></p>
+                <p>Your ebook has been processed using {translation_method} and files are saved in: <strong>{output_folder}/</strong></p>
             </div>
             """, unsafe_allow_html=True)
             

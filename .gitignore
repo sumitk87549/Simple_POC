@@ -208,3 +208,5 @@ __marimo__/
 
 # Processed files (translations and audio)
 processed/
+*.txt
+*.mp3
