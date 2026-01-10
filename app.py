@@ -296,7 +296,7 @@ def process_ebook(uploaded_file, extractor, cleaner, translator, enhanced_tts, t
         result = {'success': False, 'processed_files': []}
         
         # Always save cleaned text to processed folder
-        cleaned_file_path = os.path.join("./processed", f"{book_name}_{timestamp}_cleaned.txt")
+        cleaned_file_path = os.path.join("./processed", f"{book_name}_cleaned.txt")
         os.makedirs(os.path.dirname(cleaned_file_path), exist_ok=True)
         with open(cleaned_file_path, 'w', encoding='utf-8') as f:
             f.write(cleaned_text)
